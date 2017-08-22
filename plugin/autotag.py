@@ -9,6 +9,8 @@ import fileinput
 import sys
 import vim  # pylint: disable=F0401
 import logging
+import subprocess
+from traceback import format_exc
 from collections import defaultdict
 
 # global vim config variables used (all are g:autotag<name>):
@@ -19,7 +21,8 @@ from collections import defaultdict
 # CtagsCmd name of ctags command
 # TagsFile name of tags file to look for
 # Disabled Disable autotag (enable by setting to any non-blank value)
-# StopAt stop looking for a tags file (and make one) at this directory (defaults to $HOME)
+# StopAt stop looking for a tags file (and make one) at this directory
+# (defaults to $HOME)
 GLOBALS_DEFAULTS = dict(maxTagsFileSize=1024 * 1024 * 7,
                         ExcludeSuffixes="tml.xml.text.txt",
                         VerbosityLevel=logging.WARNING,
@@ -29,40 +32,20 @@ GLOBALS_DEFAULTS = dict(maxTagsFileSize=1024 * 1024 * 7,
                         Disabled=0,
                         StopAt=0)
 
-# Just in case the ViM build you're using doesn't have subprocess
-if sys.version < '2.4':
-    def do_cmd(cmd, cwd):
-        """ Python 2.3 has no subprocess """
-        old_cwd = os.getcwd()
-        os.chdir(cwd)
-        ch_out = os.popen2(cmd)[1]
-        for _ in ch_out:
-            pass
-        os.chdir(old_cwd)
+kw = {"shell": True,
+      "stdin": subprocess.PIPE,
+      "stdout": subprocess.PIPE,
+      "stderr": subprocess.PIPE}
+if sys.version >= '3':
+    kw["universal_newlines"] = True
 
-    import traceback
 
-    def format_exc():
-        """ replace missing format_exc() """
-        return ''.join(traceback.format_exception(*list(sys.exc_info())))
+def do_cmd(cmd, cwd):
+    """ Abstract subprocess """
+    p = subprocess.Popen(cmd, cwd=cwd, **kw)
+    so = p.communicate()[0]
+    return so.split("\n")
 
-else:
-    import subprocess
-
-    kw = {"shell": True,
-          "stdin": subprocess.PIPE,
-          "stdout": subprocess.PIPE,
-          "stderr": subprocess.PIPE}
-    if sys.version >= '3.5':
-        kw["universal_newlines"] = True
-
-    def do_cmd(cmd, cwd):
-        """ Abstract subprocess """
-        p = subprocess.Popen(cmd, cwd=cwd, **kw)
-        so = p.communicate()[0]
-        return so.split("\n")
-
-    from traceback import format_exc
 
 def vim_global(name, kind=str):
     """ Get global variable from vim, cast it appropriately """
@@ -93,7 +76,8 @@ def vim_global(name, kind=str):
 
 
 class VimAppendHandler(logging.Handler):
-    """ Logger handler that finds a buffer and appends the log message as a new line """
+    """Logger handler that finds a buffer and appends the log message
+       as a new line"""
     def __init__(self, name):
         logging.Handler.__init__(self)
         self.__name = name
@@ -126,6 +110,7 @@ def makeAndAddHandler(logger, name):
     ret = VimAppendHandler(name)
     logger.addHandler(ret)
     return ret
+
 
 try:
     LOGGER
@@ -234,7 +219,7 @@ class AutoTag(object):  # pylint: disable=R0902
             source.close()
             try:
                 os.unlink(tags_file + backup)
-            except StandardError:
+            except Exception:
                 pass
 
     def updateTagsFile(self, tags_dir, tags_file, sources):
